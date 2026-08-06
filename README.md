@@ -28,15 +28,51 @@ python main.py run <task-name>
 
 Every execution writes its terminal output to `logs/<timestamp>_<task-name>.log` as well as showing it in the terminal.
 
-## Current diagnostic task
+## Current tasks
 
-The first registered entry is a diagnostic for the OGIA engine:
+Diagnostic for the OGIA engine:
 
 ```powershell
 python main.py run ogia-engine-check
 ```
 
-This validates the OGame reference data and checks that `OgameData.py`, `OgameBattleSimulator.py`, `OgameUtils.py` and their Python dependencies can be imported correctly.
+Small OGame battle using the OGIA simulator:
+
+```powershell
+python main.py run ogia-battle-demo
+```
+
+The demo accepts an optional seed:
+
+```powershell
+python main.py run ogia-battle-demo --seed 123
+```
+
+## Adding a new task
+
+1. Create a Python module under `tasks/` (or inside the relevant task package).
+2. Expose a callable entrypoint with this shape:
+
+```python
+def run(args=None) -> int:
+    # task code
+    return 0
+```
+
+3. Register the task in `task_runtime/registry.py` by adding a `TaskSpec` to `_TASKS`.
+4. Add any new third-party Python packages to `requirements.txt`.
+5. Pull/install dependencies on the machine that will execute the task.
+6. Verify registration:
+
+```powershell
+python main.py list
+```
+
+7. Run it:
+
+```powershell
+python main.py run <task-name>
+```
 
 ## Project structure
 
@@ -51,6 +87,7 @@ TaskExecuter/
     └── OGIA/
         ├── __init__.py
         ├── task.py
+        ├── battle_demo.py
         ├── OgameData.py
         ├── OgameBattleSimulator.py
         └── OgameUtils.py
