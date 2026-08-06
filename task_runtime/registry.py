@@ -18,6 +18,11 @@ _TASKS = {
         module="tasks.OGIA.task",
         description="Validate that the OGIA engine and its dependencies load correctly.",
     ),
+    "ogia-battle-demo": TaskSpec(
+        name="ogia-battle-demo",
+        module="tasks.OGIA.battle_demo",
+        description="Run a small OGame battle using the OGIA simulator.",
+    ),
 }
 
 
