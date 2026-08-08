@@ -23,10 +23,10 @@ from .OgameUtils import (
 
 
 DEFAULT_COUNT = 1_000
-DEFAULT_MIN_POINTS = 100.0
-DEFAULT_MAX_POINTS = 20_000.0
-DEFAULT_ATTACKER_RATIO_MIN = 0.40
-DEFAULT_ATTACKER_RATIO_MAX = 2.50
+DEFAULT_MIN_POINTS = 200.0
+DEFAULT_MAX_POINTS = 200_000.0
+DEFAULT_ATTACKER_RATIO_MIN = 1.20
+DEFAULT_ATTACKER_RATIO_MAX = 5.00
 DEFAULT_PROGRESS_EVERY = 10
 
 
@@ -48,7 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ogia-generate-random-battles",
         description=(
-            "Generate random OGame battles across a broad point range and "
+            "Generate random OGame battles across a broad defender point range and "
             "save each completed simulation incrementally as JSONL."
         ),
     )
@@ -62,13 +62,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--min-points",
         type=_positive_float,
         default=DEFAULT_MIN_POINTS,
-        help=f"Minimum battle scale in OGame points (default: {DEFAULT_MIN_POINTS:g}).",
+        help=(
+            "Minimum defender scale in OGame points "
+            f"(default: {DEFAULT_MIN_POINTS:g})."
+        ),
     )
     parser.add_argument(
         "--max-points",
         type=_positive_float,
         default=DEFAULT_MAX_POINTS,
-        help=f"Maximum battle scale in OGame points (default: {DEFAULT_MAX_POINTS:g}).",
+        help=(
+            "Maximum defender scale in OGame points "
+            f"(default: {DEFAULT_MAX_POINTS:g})."
+        ),
     )
     parser.add_argument(
         "--attacker-ratio-min",
@@ -182,10 +188,7 @@ def _generate_one_battle(
         attacker_ratio_min,
         attacker_ratio_max,
     )
-    attacker_target_points = min(
-        max_points,
-        max(min_points, defender_target_points * attacker_ratio),
-    )
+    attacker_target_points = defender_target_points * attacker_ratio
 
     defense_details = generate_random_defense(
         target_points=defender_target_points,
@@ -291,8 +294,12 @@ def run(args: Sequence[str] | None = None) -> int:
 
     print("OGIA random battle generator")
     print(f"Target battles: {options.count:,}")
-    print(f"Point range: {min_points:g} - {max_points:g}")
+    print(f"Defender point range: {min_points:g} - {max_points:g}")
     print(f"Attacker/defender ratio range: {ratio_min:g} - {ratio_max:g}")
+    print(
+        "Maximum possible attacker target points: "
+        f"{max_points * ratio_max:g}"
+    )
     print(f"Output: {output_path}")
     print(f"Seed: {options.seed if options.seed is not None else 'random'}")
 
