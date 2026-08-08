@@ -23,6 +23,11 @@ _TASKS = {
         module="tasks.OGIA.battle_demo",
         description="Run a small OGame battle using the OGIA simulator.",
     ),
+    "ogia-generate-random-battles": TaskSpec(
+        name="ogia-generate-random-battles",
+        module="tasks.OGIA.random_battles",
+        description="Generate and incrementally save random OGame battles as JSONL.",
+    ),
 }
 
 
