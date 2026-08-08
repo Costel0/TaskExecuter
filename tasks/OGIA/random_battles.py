@@ -12,8 +12,9 @@ import uuid
 
 import numpy as np
 
-from .OgameBattleSimulator import CombatConfig, TechLevels
 from .OgameUtils import (
+    CombatConfig,
+    TechLevels,
     generate_fleet_from_percentages,
     generate_random_defense,
     generate_random_fleet_percentages,
