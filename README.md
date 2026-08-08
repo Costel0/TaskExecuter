@@ -1,6 +1,6 @@
 # TaskExecuter
 
-Python project for running long-lived tasks locally and, eventually, on a Hetzner VM.
+Python project for running long-lived tasks locally and on an OVH VPS.
 
 ## Local setup
 
@@ -48,6 +48,25 @@ The demo accepts an optional seed:
 python main.py run ogia-battle-demo --seed 123
 ```
 
+Generate a random OGame battle dataset:
+
+```powershell
+python main.py run ogia-generate-random-battles
+```
+
+By default it generates 1,000 battles across a logarithmic 100-20,000 point range and saves each completed battle incrementally as JSONL under `data/OGIA/random_battles/`.
+
+Useful arguments:
+
+```powershell
+python main.py run ogia-generate-random-battles --count 100
+python main.py run ogia-generate-random-battles --count 100 --min-points 50 --max-points 5000
+python main.py run ogia-generate-random-battles --count 100 --seed 123
+python main.py run ogia-generate-random-battles --count 100 --output data/OGIA/random_battles/test.jsonl
+```
+
+The generated dataset directory is ignored by Git so large simulation outputs remain on the machine that generated them.
+
 ## Adding a new task
 
 1. Create a Python module under `tasks/` (or inside the relevant task package).
@@ -88,6 +107,7 @@ TaskExecuter/
         ├── __init__.py
         ├── task.py
         ├── battle_demo.py
+        ├── random_battles.py
         ├── OgameData.py
         ├── OgameBattleSimulator.py
         └── OgameUtils.py
