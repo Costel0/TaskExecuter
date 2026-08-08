@@ -54,13 +54,14 @@ Generate a random OGame battle dataset:
 python main.py run ogia-generate-random-battles
 ```
 
-By default it generates 1,000 battles across a logarithmic 100-20,000 point range and saves each completed battle incrementally as JSONL under `data/OGIA/random_battles/`.
+By default it generates 1,000 battles with defender sizes sampled logarithmically between 200 and 200,000 OGame points. The attacker target size is sampled between 1.2x and 5x the defender target size, so the largest attacker target can reach 1,000,000 points. Each completed battle is saved incrementally as JSONL under `data/OGIA/random_battles/`.
 
 Useful arguments:
 
 ```powershell
 python main.py run ogia-generate-random-battles --count 100
-python main.py run ogia-generate-random-battles --count 100 --min-points 50 --max-points 5000
+python main.py run ogia-generate-random-battles --count 100 --min-points 200 --max-points 200000
+python main.py run ogia-generate-random-battles --count 100 --attacker-ratio-min 1.2 --attacker-ratio-max 5
 python main.py run ogia-generate-random-battles --count 100 --seed 123
 python main.py run ogia-generate-random-battles --count 100 --output data/OGIA/random_battles/test.jsonl
 ```
