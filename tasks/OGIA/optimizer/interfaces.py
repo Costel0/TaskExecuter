@@ -14,12 +14,7 @@ from .models import (
 
 
 class PopulationInitializer(ABC):
-    """Creates generation zero.
-
-    Intentionally left without a concrete implementation. The next design step
-    can decide whether generation zero is random, data-driven, seeded from
-    battle-analysis heuristics, or a mixture of several strategies.
-    """
+    """Strategy interface for constructing generation zero."""
 
     @abstractmethod
     def create_population(
@@ -32,11 +27,11 @@ class PopulationInitializer(ABC):
 
 
 class FitnessEvaluator(ABC):
-    """Scores a complete population for one fixed defender.
+    """Score a complete population for one fixed defender.
 
-    The batch-oriented API is deliberate: the concrete implementation can later
-    parallelize simulations, evaluate several combat seeds per genome, cache
-    repeated fleets, or use vectorized/precomputed information.
+    The batch-oriented API lets implementations share combat seeds, cache
+    equivalent fleets and later add multiprocessing without changing the
+    evolutionary engine.
     """
 
     @abstractmethod
