@@ -13,12 +13,7 @@ from .models import AttackGenome, AttackProblem, EvolutionConfig, FitnessEvaluat
 
 @dataclass(frozen=True)
 class DefenseFitnessConfig:
-    """Fitness settings for reliable, compact attacks.
-
-    Fitness is intentionally not economic. It first requires a sufficiently
-    reliable win rate and, only inside that feasible region, rewards smaller
-    attack multipliers and lower attacker losses.
-    """
+    """Fitness settings for reliable, compact attacks."""
 
     simulations_per_genome: int = 12
     reliable_win_rate: float = 0.90
@@ -48,9 +43,9 @@ class DefenseFitnessConfig:
 class ReliableDefenseFitnessEvaluator(FitnessEvaluator):
     """Evaluate attacks against one fixed defense using common combat seeds.
 
-    Every genome in every generation is evaluated on exactly the same combat
-    seeds. Elites therefore remain comparable with descendants even though the
-    engine does not re-evaluate preserved elites each generation.
+    Every genome in every generation uses exactly the same combat seeds. The
+    cache is keyed by the decoded integer fleet, but stores only combat outcomes;
+    genome-specific requested multiplier/target metrics are rebuilt each time.
     """
 
     def __init__(
@@ -72,7 +67,10 @@ class ReliableDefenseFitnessEvaluator(FitnessEvaluator):
                 dtype=np.uint64,
             )
         )
-        self._cache: dict[tuple[tuple[str, int], ...], FitnessEvaluation] = {}
+        self._cache: dict[
+            tuple[tuple[str, int], ...],
+            tuple[int, float],
+        ] = {}
 
     @property
     def training_seeds(self) -> tuple[int, ...]:
@@ -84,7 +82,7 @@ class ReliableDefenseFitnessEvaluator(FitnessEvaluator):
         genomes: Sequence[AttackGenome],
         rng: np.random.Generator,
     ) -> Sequence[FitnessEvaluation]:
-        del rng  # Seeds are fixed at evaluator construction time by design.
+        del rng
         return [self.evaluate_genome(problem, genome) for genome in genomes]
 
     def evaluate_genome(
@@ -109,27 +107,43 @@ class ReliableDefenseFitnessEvaluator(FitnessEvaluator):
         if not seeds:
             raise ValueError("At least one combat seed is required.")
 
-        cache_key = tuple(sorted((str(name), int(count)) for name, count in decoded.fleet.items()))
-        if combat_seeds is None and use_cache and cache_key in self._cache:
-            return self._cache[cache_key]
+        cache_key = tuple(
+            sorted((str(name), int(count)) for name, count in decoded.fleet.items())
+        )
+        cached = (
+            self._cache.get(cache_key)
+            if combat_seeds is None and use_cache
+            else None
+        )
+        if cached is None:
+            wins, mean_loss_ratio = self._simulate_decoded(
+                problem,
+                decoded,
+                seeds,
+            )
+            if combat_seeds is None and use_cache:
+                self._cache[cache_key] = (wins, mean_loss_ratio)
+        else:
+            wins, mean_loss_ratio = cached
 
-        evaluation = self._evaluate_decoded(problem, decoded, seeds)
-        if combat_seeds is None and use_cache:
-            self._cache[cache_key] = evaluation
-        return evaluation
+        return self._build_evaluation(
+            decoded,
+            wins=wins,
+            simulations=len(seeds),
+            mean_loss_ratio=mean_loss_ratio,
+        )
 
-    def _evaluate_decoded(
-        self,
+    @staticmethod
+    def _simulate_decoded(
         problem: AttackProblem,
         decoded: DecodedAttack,
         combat_seeds: Sequence[int],
-    ) -> FitnessEvaluation:
+    ) -> tuple[int, float]:
         if decoded.actual_attacker_points <= 0:
             raise ValueError("Decoded attack must contain positive attacker points.")
 
         wins = 0
         loss_ratios: list[float] = []
-
         for combat_seed in combat_seeds:
             result = simulate_battle(
                 attacker=decoded.fleet,
@@ -152,15 +166,23 @@ class ReliableDefenseFitnessEvaluator(FitnessEvaluator):
                 )
             )
 
-        simulations = len(combat_seeds)
-        win_rate = wins / simulations
         mean_loss_ratio = float(np.mean(loss_ratios)) if loss_ratios else 0.0
+        return int(wins), mean_loss_ratio
+
+    def _build_evaluation(
+        self,
+        decoded: DecodedAttack,
+        *,
+        wins: int,
+        simulations: int,
+        mean_loss_ratio: float,
+    ) -> FitnessEvaluation:
+        win_rate = wins / simulations
         actual_multiplier = (
             decoded.actual_attacker_points / decoded.defender_points
             if decoded.defender_points > 0
             else float("inf")
         )
-
         score = self._score(
             win_rate=win_rate,
             mean_loss_ratio=mean_loss_ratio,
@@ -192,19 +214,13 @@ class ReliableDefenseFitnessEvaluator(FitnessEvaluator):
         actual_multiplier: float,
     ) -> float:
         cfg = self.fitness_config
-
         if win_rate < cfg.reliable_win_rate:
-            # Before reliability is reached, learning to win dominates. Losses
-            # and fleet size are only tiny tie-breakers between equal win rates.
             return (
                 float(win_rate)
                 - cfg.unreliable_loss_penalty * float(mean_loss_ratio)
                 - cfg.unreliable_multiplier_penalty * float(actual_multiplier)
             )
 
-        # Any reliable attack always outranks every unreliable attack. Inside
-        # this region lower real multiplier is the main objective; losses are a
-        # secondary objective and extra reliability is only a small tie-breaker.
         return (
             cfg.reliable_score_base
             - float(actual_multiplier)
