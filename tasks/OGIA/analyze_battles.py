@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+from bisect import bisect_right
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -89,9 +90,9 @@ def _ratio_bin_index(ratio: float) -> int:
     if ratio >= RATIO_MAX:
         return len(RATIO_EDGES)
 
-    regular_index = int((ratio - RATIO_MIN) / RATIO_STEP)
-    regular_index = min(regular_index, len(RATIO_EDGES) - 2)
-    return 1 + regular_index
+    # bisect_right gives half-open buckets [lower, upper), so an exact 1.2x
+    # belongs to 1.2x–1.3x rather than 1.1x–1.2x.
+    return bisect_right(RATIO_EDGES, ratio)
 
 
 def _ratio_bin_center(index: int) -> float:
