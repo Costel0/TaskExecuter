@@ -33,6 +33,11 @@ _TASKS = {
         module="tasks.OGIA.merge_battle_datasets",
         description="Merge every OGIA JSONL battle file in a directory into one dataset.",
     ),
+    "ogia-analyze-battles": TaskSpec(
+        name="ogia-analyze-battles",
+        module="tasks.OGIA.analyze_battles",
+        description="Analyze a merged OGIA battle dataset and generate an HTML report.",
+    ),
 }
 
 
