@@ -28,6 +28,11 @@ _TASKS = {
         module="tasks.OGIA.random_battles",
         description="Generate and incrementally save random OGame battles as JSONL.",
     ),
+    "ogia-merge-battle-datasets": TaskSpec(
+        name="ogia-merge-battle-datasets",
+        module="tasks.OGIA.merge_battle_datasets",
+        description="Merge every OGIA JSONL battle file in a directory into one dataset.",
+    ),
 }
 
 
