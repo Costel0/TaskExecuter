@@ -23,7 +23,7 @@ An individual contains:
 
 The defense-guided prior is a weighted combination of the analysis rows for every defensive unit present, using their share of defender points. It is mixed 70/30 with the global top-efficiency prior.
 
-The analysis is only a prior. Large Cargo is not forced, and ship types with poor descriptive statistics are not removed from the search space.
+The analysis is only a prior. No ship type is removed from the search space. Large Cargo is additionally neutralized in the analysis-based priors by replacing its observed weight with the median weight of the other ships, because the source random-battle generator included Large Cargo in virtually every attack. Evolution remains free to drive it to zero or to a large share.
 
 ## Fitness
 
