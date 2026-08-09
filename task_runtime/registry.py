@@ -38,6 +38,11 @@ _TASKS = {
         module="tasks.OGIA.analyze_battles",
         description="Analyze a merged OGIA battle dataset and generate an HTML report.",
     ),
+    "ogia-generate-perfect-pairs": TaskSpec(
+        name="ogia-generate-perfect-pairs",
+        module="tasks.OGIA.perfect_pairs",
+        description="Generate validated defense/optimized-attack pairs with the evolutionary optimizer.",
+    ),
 }
 
 
