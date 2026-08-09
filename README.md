@@ -68,6 +68,47 @@ python main.py run ogia-generate-random-battles --count 100 --output data/OGIA/r
 
 The generated dataset directory is ignored by Git so large simulation outputs remain on the machine that generated them.
 
+## Loading generated battle datasets
+
+`tasks/OGIA/battle_dataset.py` reads the JSONL files produced by the random battle generator while preserving every stored JSON field.
+
+Load the complete file as a list:
+
+```python
+from tasks.OGIA.battle_dataset import load_battles
+
+battles = load_battles("data/OGIA/random_battles/random_battles_20260808_173848.jsonl")
+
+print(len(battles))
+print(battles[0].result.winner)
+print(battles[0].inputs.attacker)
+print(battles[0].generation.defender_target_points)
+```
+
+The records support both attribute and dictionary access:
+
+```python
+battle = battles[0]
+
+print(battle.result.winner)
+print(battle["result"]["winner"])
+```
+
+For very large datasets, iterate over the file without loading the whole dataset into RAM:
+
+```python
+from tasks.OGIA.battle_dataset import iter_battles
+
+for battle in iter_battles("data/OGIA/random_battles/battles.jsonl"):
+    print(battle.result.winner)
+```
+
+A limited sample can also be loaded with:
+
+```python
+battles = load_battles("data/OGIA/random_battles/battles.jsonl", limit=1000)
+```
+
 ## Adding a new task
 
 1. Create a Python module under `tasks/` (or inside the relevant task package).
@@ -109,6 +150,7 @@ TaskExecuter/
         ├── task.py
         ├── battle_demo.py
         ├── random_battles.py
+        ├── battle_dataset.py
         ├── OgameData.py
         ├── OgameBattleSimulator.py
         └── OgameUtils.py
