@@ -2,22 +2,24 @@
 # coding: utf-8
 
 # # OGame Battle Simulator — reference implementation
-# 
-# Motor de combate modular en Python. Los datos estáticos de unidades y fuego rápido se importan desde `OgameData`, de modo que el simulador contiene únicamente reglas y estado de combate.
-# 
-# El notebook puede convertirse a `OgameBattleSimulator.py` e importarse desde otros Colabs.
-
-# In[ ]:
-
+#
+# Motor de combate modular en Python. Los datos estáticos de unidades y fuego
+# rápido se importan desde `OgameData`. El estado de combate se almacena de
+# forma comprimida para poder manejar flotas grandes sin crear un objeto Python
+# por cada nave/defensa ni reconstruir la lista de objetivos vivos por disparo.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Mapping, Optional
+import importlib
 import math
 import random
 import statistics
+import subprocess
+import sys
 
 __all__ = [
     "UnitSpec", "TechLevels", "CombatConfig", "BattleResult",
@@ -28,16 +30,6 @@ __all__ = [
 
 
 # ## 1. Importar los datos comunes
-# 
-# `UnitSpec`, `UNIT_SPECS`, `RAPID_FIRE` y las validaciones viven en `OgameData`. El bloque siguiente mantiene compatibilidad mientras los módulos todavía se desarrollan como notebooks: si no existe `OgameData.py`, convierte automáticamente `OgameData.ipynb`.
-
-# In[ ]:
-
-
-from pathlib import Path
-import importlib
-import subprocess
-import sys
 
 
 def _project_directory() -> Path:
@@ -108,8 +100,6 @@ validate_reference_data = _ogame_data.validate_reference_data
 
 # ## 2. Tecnologías, configuración y estado interno
 
-# In[ ]:
-
 
 @dataclass(frozen=True)
 class TechLevels:
@@ -146,16 +136,30 @@ class CombatConfig:
     reaper_harvest_fraction: float = 0.25
 
 
-@dataclass
-class UnitState:
+@dataclass(slots=True)
+class _UnitTypeState:
+    """Compressed combat state for all living units of one type.
+
+    A pristine unit does not need a Python object of its own. Only units whose
+    current hull or shield differs from the default state are represented in
+    ``damaged``. Its integer keys are dense logical indices in ``range(count)``.
+    """
+
     kind: str
-    hull: float
-    shield: float
+    count: int
     max_hull: float
     max_shield: float
     weapon: float
     is_defense: bool
-    alive: bool = True
+    damaged: Dict[int, tuple[float, float]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BattleSideState:
+    """Compressed state of one side of a battle."""
+
+    unit_types: list[_UnitTypeState]
+    total_alive: int
 
 
 @dataclass
@@ -242,34 +246,43 @@ def _normalise_resources(resources: Optional[Mapping[str, int]]) -> Dict[str, in
     return out
 
 
-def build_side(composition: Mapping[str, int], tech: TechLevels) -> List[UnitState]:
-    units: List[UnitState] = []
+def build_side(composition: Mapping[str, int], tech: TechLevels) -> BattleSideState:
+    """Build one combat side without allocating one object per unit."""
+    unit_types: list[_UnitTypeState] = []
+    total_alive = 0
+
     for kind, count in composition.items():
         if kind not in UNIT_SPECS:
             raise KeyError(f"Unknown unit: {kind}")
         if int(count) != count or count < 0:
             raise ValueError(f"Invalid count for {kind}: {count}")
+
+        count = int(count)
+        if count == 0:
+            continue
+
         spec = UNIT_SPECS[kind]
-        max_hull = spec.hull * tech.hull_multiplier()
-        max_shield = spec.shield * tech.shield_multiplier()
-        weapon = spec.weapon * tech.weapon_multiplier()
-        units.extend(
-            UnitState(
-                kind,
-                max_hull,
-                max_shield,
-                max_hull,
-                max_shield,
-                weapon,
-                spec.is_defense,
+        unit_types.append(
+            _UnitTypeState(
+                kind=kind,
+                count=count,
+                max_hull=spec.hull * tech.hull_multiplier(),
+                max_shield=spec.shield * tech.shield_multiplier(),
+                weapon=spec.weapon * tech.weapon_multiplier(),
+                is_defense=spec.is_defense,
             )
-            for _ in range(int(count))
         )
-    return units
+        total_alive += count
+
+    return BattleSideState(unit_types=unit_types, total_alive=total_alive)
 
 
-def survivor_counts(units: Iterable[UnitState]) -> Dict[str, int]:
-    return dict(Counter(u.kind for u in units if u.alive))
+def survivor_counts(side: BattleSideState) -> Dict[str, int]:
+    return {
+        unit_type.kind: unit_type.count
+        for unit_type in side.unit_types
+        if unit_type.count > 0
+    }
 
 
 def fleet_cost(composition: Mapping[str, int]) -> Dict[str, int]:
@@ -286,12 +299,7 @@ def fleet_cost(composition: Mapping[str, int]) -> Dict[str, int]:
 
 
 def fleet_cargo_capacity(composition: Mapping[str, int]) -> int:
-    """Base cargo capacity of a fleet composition.
-
-    Fuel already spent on the mission is not modelled here. Hyperspace,
-    class and lifeform cargo bonuses can later be represented by modifying
-    the unit data or adding an external multiplier.
-    """
+    """Base cargo capacity of a fleet composition."""
     total = 0
     for kind, count in composition.items():
         if kind not in UNIT_SPECS:
@@ -307,11 +315,7 @@ def calculate_loot(
     cargo_capacity: int,
     loot_percentage: float = 0.75,
 ) -> Dict[str, int]:
-    """Apply OGame's metal/crystal/deuterium plunder loading order.
-
-    The loot percentage limits how much of each planetary resource can be
-    taken. Cargo capacity can reduce the amount below that limit.
-    """
+    """Apply OGame's metal/crystal/deuterium plunder loading order."""
     resources = _normalise_resources(defender_resources)
     fraction = _normalise_fraction(loot_percentage, "loot_percentage")
 
@@ -325,12 +329,6 @@ def calculate_loot(
     }
     loot = {key: 0 for key in RESOURCE_KEYS}
 
-    # Standard OGame plunder loading order:
-    # 1) up to one third of total cargo with metal;
-    # 2) up to half the remaining cargo with crystal;
-    # 3) fill the remaining cargo with deuterium;
-    # 4) half the remaining cargo with additional metal;
-    # 5) the rest with additional crystal.
     amount = min(available["metal"], remaining_capacity // 3)
     loot["metal"] += amount
     remaining_capacity -= amount
@@ -357,61 +355,172 @@ def calculate_loot(
 
 # ## 3. Motor de una batalla
 
-# In[ ]:
+
+def _regenerate_shields(side: BattleSideState) -> None:
+    """Restore shields while touching only units with non-default state."""
+    for unit_type in side.unit_types:
+        if not unit_type.damaged:
+            continue
+
+        # A unit that only had shield damage becomes pristine again. Units with
+        # hull damage keep only that hull value and recover their full shield.
+        for index, (hull, _shield) in list(unit_type.damaged.items()):
+            if hull == unit_type.max_hull:
+                del unit_type.damaged[index]
+            else:
+                unit_type.damaged[index] = (hull, unit_type.max_shield)
 
 
-def _living(units: List[UnitState]) -> List[UnitState]:
-    return [u for u in units if u.alive]
+def _shooters_snapshot(side: BattleSideState) -> list[tuple[str, float, int]]:
+    """Snapshot every unit that is entitled to fire in the current round."""
+    return [
+        (unit_type.kind, unit_type.weapon, unit_type.count)
+        for unit_type in side.unit_types
+        if unit_type.count > 0
+    ]
 
 
-def _apply_hit(target: UnitState, damage: float, rng: random.Random, config: CombatConfig) -> None:
-    if not target.alive:
-        return
+def _choose_target(
+    side: BattleSideState,
+    rng: random.Random,
+) -> tuple[_UnitTypeState, int, float, float]:
+    """Choose one living unit uniformly with a single random index.
 
-    # OGame bounce rule: very weak shots do not affect a shield when their power
-    # is below 1% of the target's maximum shield.
-    if target.shield > 0:
-        if damage < config.shield_bounce_fraction * target.max_shield:
+    Every living ship/defense has probability ``1 / total_alive``. Mapping the
+    chosen global index to a unit type gives the same target distribution as an
+    explicit flat list, without rebuilding that list for every shot.
+    """
+    if side.total_alive <= 0:
+        raise IndexError("cannot choose a target from an empty side")
+
+    target_index = rng.randrange(side.total_alive)
+    for unit_type in side.unit_types:
+        if target_index < unit_type.count:
+            hull, shield = unit_type.damaged.get(
+                target_index,
+                (unit_type.max_hull, unit_type.max_shield),
+            )
+            return unit_type, target_index, hull, shield
+        target_index -= unit_type.count
+
+    raise RuntimeError("compressed battle state is inconsistent")
+
+
+def _remove_unit(
+    side: BattleSideState,
+    unit_type: _UnitTypeState,
+    index: int,
+) -> None:
+    """Delete one living unit in O(1) with swap-delete inside its unit type."""
+    last_index = unit_type.count - 1
+    if index < 0 or index > last_index:
+        raise IndexError("unit index out of range")
+
+    if index != last_index:
+        last_state = unit_type.damaged.pop(last_index, None)
+        if last_state is None:
+            unit_type.damaged.pop(index, None)
+        else:
+            unit_type.damaged[index] = last_state
+    else:
+        unit_type.damaged.pop(index, None)
+
+    unit_type.count -= 1
+    side.total_alive -= 1
+
+
+def _store_unit_state(
+    unit_type: _UnitTypeState,
+    index: int,
+    hull: float,
+    shield: float,
+) -> None:
+    if hull == unit_type.max_hull and shield == unit_type.max_shield:
+        unit_type.damaged.pop(index, None)
+    else:
+        unit_type.damaged[index] = (hull, shield)
+
+
+def _apply_hit(
+    targets: BattleSideState,
+    unit_type: _UnitTypeState,
+    index: int,
+    hull: float,
+    shield: float,
+    damage: float,
+    rng: random.Random,
+    config: CombatConfig,
+) -> None:
+    # OGame bounce rule: very weak shots do not affect an active shield when
+    # their power is below 1% of that target's maximum shield.
+    if shield > 0:
+        if damage < config.shield_bounce_fraction * unit_type.max_shield:
             return
-        absorbed = min(target.shield, damage)
-        target.shield -= absorbed
+        absorbed = min(shield, damage)
+        shield -= absorbed
         damage -= absorbed
 
     if damage > 0:
-        target.hull -= damage
+        hull -= damage
 
-    if target.hull <= 0:
-        target.alive = False
+    if hull <= 0:
+        _remove_unit(targets, unit_type, index)
         return
 
-    # When hull falls below 70%, the unit may explode. The probability is
-    # 1 - current_hull/max_hull.
-    hull_fraction = target.hull / target.max_hull
+    # Below 70% hull, every damaging hit can make the unit explode with
+    # probability 1 - current_hull/max_hull.
+    hull_fraction = hull / unit_type.max_hull
     if hull_fraction < config.explosion_hull_threshold:
         if rng.random() < (1.0 - hull_fraction):
-            target.alive = False
+            _remove_unit(targets, unit_type, index)
+            return
+
+    _store_unit_state(unit_type, index, hull, shield)
 
 
 def _fire_phase(
-    shooters_snapshot: List[UnitState],
-    targets: List[UnitState],
+    shooters_snapshot: list[tuple[str, float, int]],
+    targets: BattleSideState,
     rng: random.Random,
     config: CombatConfig,
 ) -> int:
-    shots = 0
-    for shooter in shooters_snapshot:
-        # Simultaneous rounds: a unit alive at the beginning of the round still fires,
-        # even if it was destroyed during the opponent's phase.
-        while _living(targets):
-            target = rng.choice(_living(targets))
-            _apply_hit(target, shooter.weapon, rng, config)
-            shots += 1
+    """Resolve one side's shots without rebuilding target lists.
 
-            if not config.use_rapid_fire:
-                break
-            rf = RAPID_FIRE.get((shooter.kind, target.kind), 1)
-            if rf <= 1 or rng.random() >= (1.0 - 1.0 / rf):
-                break
+    Shooters are still processed individually. Rapid Fire is also resolved one
+    extra shot at a time, preserving the official random-target and RF rules.
+    """
+    shots = 0
+
+    for shooter_kind, shooter_weapon, shooter_count in shooters_snapshot:
+        for _ in range(shooter_count):
+            if targets.total_alive <= 0:
+                return shots
+
+            while targets.total_alive > 0:
+                target_type, target_index, hull, shield = _choose_target(targets, rng)
+                target_kind = target_type.kind
+
+                _apply_hit(
+                    targets,
+                    target_type,
+                    target_index,
+                    hull,
+                    shield,
+                    shooter_weapon,
+                    rng,
+                    config,
+                )
+                shots += 1
+
+                # Since OGame v10 the RF calculation stops once there are no
+                # targets left. Do not even roll for another RF shot in that case.
+                if not config.use_rapid_fire or targets.total_alive <= 0:
+                    break
+
+                rf = RAPID_FIRE.get((shooter_kind, target_kind), 1)
+                if rf <= 1 or rng.random() >= (1.0 - 1.0 / rf):
+                    break
+
     return shots
 
 
@@ -451,11 +560,7 @@ def _harvest_debris(
     cargo_capacity: int,
     max_fraction: float,
 ) -> Dict[str, int]:
-    """Harvest a capped fraction of a metal/crystal debris field.
-
-    When cargo is insufficient, metal and crystal are loaded as evenly as
-    possible, matching the usual debris harvesting behaviour.
-    """
+    """Harvest a capped fraction of a metal/crystal debris field."""
     fraction = _normalise_fraction(max_fraction, "reaper_harvest_fraction")
     capacity = max(0, int(cargo_capacity))
 
@@ -466,14 +571,12 @@ def _harvest_debris(
     }
     harvested = {key: 0 for key in RESOURCE_KEYS}
 
-    # Try to split capacity evenly between metal and crystal.
     metal_take = min(eligible["metal"], capacity // 2)
     crystal_take = min(eligible["crystal"], capacity // 2)
     harvested["metal"] = metal_take
     harvested["crystal"] = crystal_take
     capacity -= metal_take + crystal_take
 
-    # If one resource is scarce, use the remaining capacity for the other.
     if capacity > 0:
         metal_left = eligible["metal"] - harvested["metal"]
         extra = min(metal_left, capacity)
@@ -512,23 +615,7 @@ def simulate_battle(
     defender_resources: Optional[Mapping[str, int]] = None,
     loot_percentage: float = 0.75,
 ) -> BattleResult:
-    """Simulate one battle and its immediate economic consequences.
-
-    Parameters
-    ----------
-    defender_resources:
-        Planetary metal, crystal and deuterium available before the attack.
-        Missing keys default to zero.
-    loot_percentage:
-        Maximum fraction of each planetary resource that can be pillaged.
-        Both ``0.75`` and ``75`` are accepted. The default is 75%.
-
-    Notes
-    -----
-    Loot is only obtained when the attacker wins. It is constrained by the
-    surviving attacker's total cargo capacity. Debris collected automatically
-    by surviving attacking Reapers occupies cargo space before loot is loaded.
-    """
+    """Simulate one battle and its immediate economic consequences."""
     loot_fraction = _normalise_fraction(loot_percentage, "loot_percentage")
     planet_resources = _normalise_resources(defender_resources)
 
@@ -542,16 +629,19 @@ def simulate_battle(
     rounds = 0
 
     for round_idx in range(1, config.max_rounds + 1):
-        if not _living(a_units) or not _living(d_units):
+        if a_units.total_alive <= 0 or d_units.total_alive <= 0:
             break
         rounds = round_idx
 
         # Shields regenerate fully at the start of every round.
-        for unit in _living(a_units) + _living(d_units):
-            unit.shield = unit.max_shield
+        _regenerate_shields(a_units)
+        _regenerate_shields(d_units)
 
-        a_snapshot = list(_living(a_units))
-        d_snapshot = list(_living(d_units))
+        # Both snapshots are taken before either side fires. A unit alive at the
+        # start of the round therefore still fires even if the other side destroys
+        # it during its firing phase.
+        a_snapshot = _shooters_snapshot(a_units)
+        d_snapshot = _shooters_snapshot(d_units)
         shots_a += _fire_phase(a_snapshot, d_units, rng, config)
         shots_d += _fire_phase(d_snapshot, a_units, rng, config)
 
@@ -581,9 +671,6 @@ def simulate_battle(
         * UNIT_SPECS["reaper"].cargo_capacity
     )
 
-    # Each side's surviving Reapers may collect up to the configured fraction
-    # of the initial debris. At the standard 25%, both sides combined can never
-    # remove more than half of the field.
     attacker_reaper_harvest = _harvest_debris(
         debris_generated,
         attacker_reaper_capacity,
@@ -595,8 +682,6 @@ def simulate_battle(
         reaper_fraction,
     )
 
-    # Guard against non-standard configurations in which the two independent
-    # caps could exceed the available field.
     for key in ("metal", "crystal"):
         overflow = (
             attacker_reaper_harvest[key]
@@ -668,8 +753,6 @@ def simulate_battle(
 
 
 # ## 4. Monte Carlo: muchas batallas
-
-# In[ ]:
 
 
 def simulate_many(
@@ -743,28 +826,3 @@ def simulate_many(
         ),
         "raw_results": results,
     }
-
-
-# ## 5. Ejemplo con recursos, loot y Reapers
-# 
-# ```python
-# result = simulate_battle(
-#     attacker={"reaper": 5, "large_cargo": 20},
-#     defender={"rocket_launcher": 100, "small_cargo": 10},
-#     defender_resources={
-#         "metal": 1_000_000,
-#         "crystal": 500_000,
-#         "deuterium": 250_000,
-#     },
-#     loot_percentage=0.75,  # también se acepta 75
-#     seed=42,
-# )
-# 
-# print(result.loot)
-# print(result.debris_generated)
-# print(result.attacker_reaper_harvest)
-# print(result.debris_remaining)
-# ```
-# 
-# Los porcentajes de escombros y el límite de reciclaje de los Reapers se pueden adaptar a cada universo mediante `CombatConfig`.
-# 
