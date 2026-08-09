@@ -38,10 +38,12 @@ class AttackGenome:
         if total <= 0:
             raise ValueError("An attack genome must contain at least one positive ship weight.")
 
+        # Keep explicit zeroes when an allowed ship list is provided. This makes
+        # persisted optimizer labels directly convertible to fixed-size ML
+        # vectors while remaining compatible with fleet decoders that ignore 0%.
         return {
             ship_name: weight / total
             for ship_name, weight in weights.items()
-            if weight > 0
         }
 
     def percentages(
@@ -68,12 +70,7 @@ class AttackProblem:
 
 @dataclass(frozen=True)
 class FitnessEvaluation:
-    """Result returned by the future concrete fitness implementation.
-
-    The evolutionary engine always maximizes ``score``. Any losses, risk,
-    fleet cost, fuel cost or other penalties should therefore be incorporated
-    into the score by the fitness implementation.
-    """
+    """One optimizer evaluation. The evolutionary engine maximizes ``score``."""
 
     score: float
     metrics: Mapping[str, Any] = field(default_factory=dict)
@@ -107,11 +104,7 @@ class OptimizationResult:
 
 @dataclass(frozen=True)
 class EvolutionConfig:
-    """Structural parameters of the evolutionary search.
-
-    Defaults are intentionally provisional. They make the architecture usable
-    while keeping every important search parameter exposed for later tuning.
-    """
+    """Structural parameters of the evolutionary search."""
 
     population_size: int = 128
     generations: int = 100
