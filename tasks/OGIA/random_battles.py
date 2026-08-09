@@ -12,10 +12,10 @@ import uuid
 
 import numpy as np
 
+from .fast_fleet import generate_fleet_from_percentages_fast
 from .OgameUtils import (
     CombatConfig,
     TechLevels,
-    generate_fleet_from_percentages,
     generate_random_defense,
     generate_random_fleet_percentages,
     simulate_battle_with_profit,
@@ -199,6 +199,9 @@ def _generate_one_battle(
         return_details=True,
     )
 
+    # Keep the full structural variety of the dataset: every battle independently
+    # samples between 2 and 6 attacker ship types and random point shares. Only
+    # the conversion from those percentages to integer counts is approximate.
     fleet_percentages = generate_random_fleet_percentages(
         min_ship_types=2,
         max_ship_types=6,
@@ -206,12 +209,12 @@ def _generate_one_battle(
         minimum_percentage=3.0,
         rng=rng,
     )
-    fleet_details = generate_fleet_from_percentages(
+    fleet_details = generate_fleet_from_percentages_fast(
         fleet_percentages,
         points=attacker_target_points,
         percentage_basis="points",
         return_details=True,
-        solver_threads=1,
+        preserve_selected_types=True,
     )
 
     attacker = fleet_details["fleet"]
