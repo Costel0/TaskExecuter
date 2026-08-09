@@ -68,6 +68,54 @@ python main.py run ogia-generate-random-battles --count 100 --output data/OGIA/r
 
 The generated dataset directory is ignored by Git so large simulation outputs remain on the machine that generated them.
 
+## Evolutionary perfect-pair generation
+
+After generating and analyzing the random battle dataset, optimized defense/attack pairs can be produced with:
+
+```powershell
+python main.py run ogia-generate-perfect-pairs
+```
+
+The task expects optimizer priors at:
+
+```text
+data/OGIA/Analisis/merged_battles_1_analysis.json
+```
+
+and writes accepted pairs incrementally as JSONL under:
+
+```text
+data/OGIA/perfect_pairs/
+```
+
+Weapons, shielding and armour are fixed to level 15 for attacker and defender. Generation zero is 85% analysis-guided/diversified and 15% broad exploration. The evolutionary fitness first seeks a reliable attack and then minimizes real attacker/defender points and attacker losses. All individuals use common combat seeds during evolution. Final candidates are re-tested on independent common seeds and a pair is saved only if it reaches the validation threshold.
+
+Production defaults:
+
+- 64 individuals;
+- 50 generations;
+- 12 common training simulations per genome;
+- 90% search reliability threshold;
+- 2 optimizer restarts per defense;
+- 20 diverse final candidates checked;
+- 128 independent validation battles;
+- 95% minimum validation win rate;
+- attacker multiplier search range 0.5x–6.0x.
+
+Start with a small smoke run before a long VM job:
+
+```powershell
+python main.py run ogia-generate-perfect-pairs --count 1 --population-size 16 --generations 5 --training-simulations 4 --validation-simulations 32 --validation-win-rate 0.90 --restarts 1
+```
+
+Generate a custom number of production pairs:
+
+```powershell
+python main.py run ogia-generate-perfect-pairs --count 100 --seed 123
+```
+
+The generated pair dataset directory is ignored by Git.
+
 ## Typed battle datasets
 
 `tasks/OGIA/battle_dataset.py` separates the JSONL storage format from the Python objects used by the rest of the project.
@@ -202,6 +250,18 @@ TaskExecuter/
         ├── random_battles.py
         ├── battle_dataset.py
         ├── merge_battle_datasets.py
+        ├── analyze_battles.py
+        ├── perfect_pairs.py
+        ├── optimizer/
+        │   ├── __init__.py
+        │   ├── decoder.py
+        │   ├── engine.py
+        │   ├── fitness.py
+        │   ├── initializer.py
+        │   ├── interfaces.py
+        │   ├── models.py
+        │   ├── operators.py
+        │   └── README.md
         ├── OgameData.py
         ├── OgameBattleSimulator.py
         └── OgameUtils.py
