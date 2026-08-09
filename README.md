@@ -68,33 +68,51 @@ python main.py run ogia-generate-random-battles --count 100 --output data/OGIA/r
 
 The generated dataset directory is ignored by Git so large simulation outputs remain on the machine that generated them.
 
-## Loading generated battle datasets
+## Typed battle datasets
 
-`tasks/OGIA/battle_dataset.py` reads the JSONL files produced by the random battle generator while preserving every stored JSON field.
+`tasks/OGIA/battle_dataset.py` separates the JSONL storage format from the Python objects used by the rest of the project.
 
-Load the complete file as a list:
+Loading a file produces interpreted `BattleRecord` objects. Technologies, combat configuration and battle results are restored as the same domain classes used by the simulator:
+
+```python
+from tasks.OGIA.battle_dataset import BattleDataset
+
+battles = BattleDataset.from_file(
+    "data/OGIA/random_battles/random_battles_20260808_173848.jsonl"
+)
+
+for battle in battles:
+    print(battle.inputs.attacker)
+    print(battle.inputs.attacker_tech.weapons)
+    print(battle.inputs.combat_config.max_rounds)
+    print(battle.result.winner)
+    print(battle.result.attacker_destroyed)
+    print(battle.result.minimum_profit_total)
+```
+
+Important interpreted types include:
+
+- `BattleRecord`
+- `GenerationMetadata`
+- `BattleInputs`
+- `TechLevels`
+- `CombatConfig`
+- `CompositionDetails`
+- `FleetCompositionDetails`
+- `DefenseCompositionDetails`
+- `BattleResultWithProfit`
+
+`generated_at_utc` is restored as a Python `datetime`.
+
+If a plain list is preferred:
 
 ```python
 from tasks.OGIA.battle_dataset import load_battles
 
-battles = load_battles("data/OGIA/random_battles/random_battles_20260808_173848.jsonl")
-
-print(len(battles))
-print(battles[0].result.winner)
-print(battles[0].inputs.attacker)
-print(battles[0].generation.defender_target_points)
+battles = load_battles("data/OGIA/random_battles/battles.jsonl")
 ```
 
-The records support both attribute and dictionary access:
-
-```python
-battle = battles[0]
-
-print(battle.result.winner)
-print(battle["result"]["winner"])
-```
-
-For very large datasets, iterate over the file without loading the whole dataset into RAM:
+For very large files, iterate without loading the full dataset into RAM:
 
 ```python
 from tasks.OGIA.battle_dataset import iter_battles
@@ -103,11 +121,43 @@ for battle in iter_battles("data/OGIA/random_battles/battles.jsonl"):
     print(battle.result.winner)
 ```
 
-A limited sample can also be loaded with:
+## Combining datasets from several runs or machines
+
+All `.jsonl` files in a directory can be interpreted and combined directly into one Python list:
 
 ```python
-battles = load_battles("data/OGIA/random_battles/battles.jsonl", limit=1000)
+from tasks.OGIA.battle_dataset import load_battles_from_directory
+
+battles = load_battles_from_directory(
+    "data/OGIA/random_battles"
+)
 ```
+
+Or use the console task to consolidate all `.jsonl` files in a directory into one validated JSONL file:
+
+```powershell
+python main.py run ogia-merge-battle-datasets data/OGIA/random_battles
+```
+
+The default output is:
+
+```text
+data/OGIA/random_battles/merged_battles.jsonl
+```
+
+A custom output path can be supplied:
+
+```powershell
+python main.py run ogia-merge-battle-datasets data/OGIA/random_battles --output data/OGIA/all_battles.jsonl
+```
+
+Use `--recursive` to also include JSONL files in subdirectories:
+
+```powershell
+python main.py run ogia-merge-battle-datasets data/OGIA --recursive
+```
+
+The selected output file is excluded from its own input set, so the merge command can safely be re-run with the same output path.
 
 ## Adding a new task
 
@@ -151,9 +201,10 @@ TaskExecuter/
         ├── battle_demo.py
         ├── random_battles.py
         ├── battle_dataset.py
+        ├── merge_battle_datasets.py
         ├── OgameData.py
         ├── OgameBattleSimulator.py
         └── OgameUtils.py
 ```
 
-`task_runtime` contains generic execution infrastructure. Each real task lives under `tasks/` and exposes a `run(args)` entrypoint. Reusable code specific to that task can live alongside its entrypoint.
+`task_runtime` contains generic execution infrastructure. Each real task lives under `tasks/` and exposes a `run(args)` entrypoint. Reusable OGIA data models and dataset utilities live alongside the OGIA task modules.
