@@ -7,3 +7,4 @@ logs/
 *.log
 data/OGIA/random_battles/
 data/OGIA/perfect_pairs/
+data/OGIA/models/
