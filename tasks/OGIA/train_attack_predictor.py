@@ -7,7 +7,9 @@ import math
 from pathlib import Path
 
 from .attack_predictor import (
+    CombatEvaluationConfig,
     TrainingConfig,
+    evaluate_oof_against_oracle,
     load_perfect_pairs,
     train_attack_predictor,
 )
@@ -42,6 +44,13 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
+def _probability(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or not 0 < parsed <= 1:
+        raise argparse.ArgumentTypeError("must be in (0, 1]")
+    return parsed
+
+
 def _default_output_paths() -> tuple[Path, Path]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     stem = f"attack_predictor_m0_{timestamp}"
@@ -56,7 +65,8 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="ogia-train-attack-predictor",
         description=(
             "Train the Phase-B M0 attack predictor from validated "
-            "perfect-pair JSONL files."
+            "perfect-pair JSONL files and evaluate its out-of-fold attacks "
+            "with the real OGame combat engine."
         ),
     )
     parser.add_argument(
@@ -79,7 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--report",
         type=Path,
         default=None,
-        help="Output JSON training report path.",
+        help="Output JSON training/evaluation report path.",
     )
     parser.add_argument("--folds", type=_positive_int, default=5)
     parser.add_argument("--epochs", type=_positive_int, default=500)
@@ -129,6 +139,43 @@ def _build_parser() -> argparse.ArgumentParser:
             "Torch device: auto, cpu, cuda, cuda:0, ... "
             "(default: auto)."
         ),
+    )
+
+    combat = parser.add_argument_group("combat-aware OOF evaluation")
+    combat.add_argument(
+        "--combat-simulations",
+        type=_positive_int,
+        default=128,
+        help=(
+            "Fresh combat simulations for each model attack and oracle attack "
+            "(default: 128)."
+        ),
+    )
+    combat.add_argument(
+        "--combat-reliable-win-rate",
+        type=_probability,
+        default=0.90,
+        help=(
+            "Win-rate threshold that makes an attack reliable during M0 "
+            "evaluation (default: 0.90)."
+        ),
+    )
+    combat.add_argument(
+        "--combat-seed",
+        type=int,
+        default=123_456,
+        help="Seed for fresh common combat simulations (default: 123456).",
+    )
+    combat.add_argument(
+        "--combat-progress-every",
+        type=_positive_int,
+        default=10,
+        help="Print combat evaluation progress every N pairs (default: 10).",
+    )
+    combat.add_argument(
+        "--skip-combat-evaluation",
+        action="store_true",
+        help="Train M0 without running the real combat-engine OOF evaluation.",
     )
     return parser
 
@@ -185,6 +232,24 @@ def run(args=None) -> int:
     report = dict(artifacts.report)
     report["source_files"] = source_files
     report["checkpoint_path"] = str(artifacts.checkpoint_path)
+
+    if not parsed.skip_combat_evaluation:
+        print("", flush=True)
+        print(
+            "Combat-aware OOF evaluation against the Phase-A oracle:",
+            flush=True,
+        )
+        report["combat_evaluation"] = evaluate_oof_against_oracle(
+            examples,
+            report["oof_predictions"],
+            config=CombatEvaluationConfig(
+                simulations_per_attack=parsed.combat_simulations,
+                reliable_win_rate=parsed.combat_reliable_win_rate,
+                seed=parsed.combat_seed,
+                progress_every=parsed.combat_progress_every,
+            ),
+        )
+
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(report, indent=2),
@@ -193,7 +258,7 @@ def run(args=None) -> int:
 
     metrics = report["oof_metrics"]
     print("", flush=True)
-    print("Cross-validated M0 metrics:", flush=True)
+    print("Cross-validated M0 imitation metrics:", flush=True)
     print(
         "  composition L1 distance: "
         f"{metrics['composition_l1_distance']:.6f}",
@@ -219,6 +284,54 @@ def run(args=None) -> int:
         f"{metrics['multiplier_rmse']:.6f}",
         flush=True,
     )
+
+    combat_report = report.get("combat_evaluation")
+    if combat_report:
+        summary = combat_report["summary"]
+        print("", flush=True)
+        print("Combat-aware OOF metrics (primary):", flush=True)
+        print(
+            "  model reliable attacks:  "
+            f"{summary['prediction_reliable_rate']:.2%}",
+            flush=True,
+        )
+        print(
+            "  oracle reliable attacks: "
+            f"{summary['oracle_reliable_rate']:.2%}",
+            flush=True,
+        )
+        print(
+            "  mean oracle efficiency:  "
+            f"{summary['mean_oracle_efficiency']:.2%}",
+            flush=True,
+        )
+        print(
+            "  median oracle efficiency:"
+            f" {summary['median_oracle_efficiency']:.2%}",
+            flush=True,
+        )
+        print(
+            "  >= 90% oracle efficiency:"
+            f" {summary['oracle_efficiency_at_least_90pct']:.2%}",
+            flush=True,
+        )
+        print(
+            "  >= 95% oracle efficiency:"
+            f" {summary['oracle_efficiency_at_least_95pct']:.2%}",
+            flush=True,
+        )
+        print(
+            "  >= 99% oracle efficiency:"
+            f" {summary['oracle_efficiency_at_least_99pct']:.2%}",
+            flush=True,
+        )
+        print(
+            "  mean fitness score ratio:"
+            f" {summary['mean_fitness_score_ratio']:.2%}",
+            flush=True,
+        )
+
+    print("", flush=True)
     print(
         f"Saved checkpoint: {artifacts.checkpoint_path}",
         flush=True,
