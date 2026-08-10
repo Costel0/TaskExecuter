@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
@@ -26,6 +26,9 @@ class PerfectPairExample:
     points_multiplier: float
     source_path: str
     line_number: int
+    attacker_tech: Mapping[str, Any] = field(default_factory=dict)
+    defender_tech: Mapping[str, Any] = field(default_factory=dict)
+    combat_config: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,18 @@ def _normalise_ship_weights(
     return {name: value / total for name, value in weights.items()}
 
 
+def _mapping_field(
+    parent: Mapping[str, Any],
+    name: str,
+) -> dict[str, Any]:
+    value = parent.get(name, {})
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"inputs.{name} must be a mapping when present.")
+    return {str(key): item for key, item in value.items()}
+
+
 def _parse_pair(
     payload: Mapping[str, Any],
     *,
@@ -160,6 +175,9 @@ def _parse_pair(
         points_multiplier=multiplier,
         source_path=str(source_path),
         line_number=line_number,
+        attacker_tech=_mapping_field(inputs, "attacker_tech"),
+        defender_tech=_mapping_field(inputs, "defender_tech"),
+        combat_config=_mapping_field(inputs, "combat_config"),
     )
 
 
