@@ -75,6 +75,32 @@ def _prediction_by_pair_id(
     return result
 
 
+def _tech_levels(values: Mapping) -> TechLevels:
+    if not values:
+        return TechLevels(
+            weapons=FIXED_TECH_LEVEL,
+            shielding=FIXED_TECH_LEVEL,
+            armour=FIXED_TECH_LEVEL,
+        )
+    return TechLevels(
+        weapons=int(values.get("weapons", 0)),
+        shielding=int(values.get("shielding", 0)),
+        armour=int(values.get("armour", 0)),
+    )
+
+
+def _combat_config(values: Mapping) -> CombatConfig:
+    if not values:
+        return CombatConfig()
+    allowed = set(CombatConfig.__dataclass_fields__)
+    unknown = set(values) - allowed
+    if unknown:
+        raise ValueError(
+            f"Perfect pair contains unsupported CombatConfig fields: {sorted(unknown)}"
+        )
+    return CombatConfig(**{str(name): value for name, value in values.items()})
+
+
 def _aggregate(rows: Sequence[dict]) -> dict:
     if not rows:
         return {
@@ -205,11 +231,6 @@ def evaluate_oof_against_oracle(
             + ", ".join(missing[:5])
         )
 
-    tech = TechLevels(
-        weapons=FIXED_TECH_LEVEL,
-        shielding=FIXED_TECH_LEVEL,
-        armour=FIXED_TECH_LEVEL,
-    )
     evolution_config = EvolutionConfig(allowed_ships=ATTACK_SHIPS)
     fitness_config = DefenseFitnessConfig(
         simulations_per_genome=config.simulations_per_attack,
@@ -239,9 +260,9 @@ def evaluate_oof_against_oracle(
         )
         problem = AttackProblem(
             defender=example.defender,
-            attacker_tech=tech,
-            defender_tech=tech,
-            combat_config=CombatConfig(),
+            attacker_tech=_tech_levels(example.attacker_tech),
+            defender_tech=_tech_levels(example.defender_tech),
+            combat_config=_combat_config(example.combat_config),
         )
 
         pair_seed = int(rng.integers(0, 2**32 - 1, dtype=np.uint64))
@@ -328,7 +349,7 @@ def evaluate_oof_against_oracle(
             "simulations_per_attack": config.simulations_per_attack,
             "reliable_win_rate": config.reliable_win_rate,
             "seed": config.seed,
-            "fixed_technology_level": FIXED_TECH_LEVEL,
+            "combat_inputs": "recorded per perfect pair; Phase-A tech-15/default-config fallback",
         },
         "summary": _aggregate(evaluated_rows),
         "pairs": evaluated_rows,
