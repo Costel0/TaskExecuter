@@ -12,6 +12,10 @@ from .initializer import (
     HybridInitializerConfig,
 )
 from .interfaces import FitnessEvaluator, PopulationInitializer
+from .ml_initializer import (
+    MLSeededInitializerConfig,
+    MLSeededPopulationInitializer,
+)
 from .models import (
     AttackGenome,
     AttackProblem,
@@ -35,6 +39,8 @@ __all__ = [
     "GenerationStats",
     "HybridAnalysisPopulationInitializer",
     "HybridInitializerConfig",
+    "MLSeededInitializerConfig",
+    "MLSeededPopulationInitializer",
     "OptimizationResult",
     "PopulationInitializer",
     "ReliableDefenseFitnessEvaluator",
