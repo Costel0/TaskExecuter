@@ -245,6 +245,8 @@ def run(args: Sequence[str] | None = None) -> int:
         multiplier_mutation_sigma=float(options.multiplier_mutation_sigma),
         min_points_multiplier=float(options.min_multiplier),
         max_points_multiplier=float(options.max_multiplier),
+        min_ship_weight=float(ml_initializer_config.min_ship_weight),
+        max_active_ship_types=int(ml_initializer_config.max_active_ship_types),
         stagnation_patience=int(options.stagnation_patience),
         min_generations_before_stopping=int(options.min_generations_before_stopping),
         stagnation_score_tolerance=float(options.stagnation_score_tolerance),
@@ -269,6 +271,11 @@ def run(args: Sequence[str] | None = None) -> int:
         f"{ml_initializer_config.local_fraction:.0%} local + "
         f"{ml_initializer_config.broad_fraction:.0%} broad + "
         f"{ml_initializer_config.analysis_blend_fraction:.0%} ML/analysis blend"
+    )
+    print(
+        "Sparse evolution: >= "
+        f"{evolution_config.min_ship_weight:.3%} share, max "
+        f"{evolution_config.max_active_ship_types} active ship types"
     )
     print(f"Population: {evolution_config.population_size}")
     print(f"Max generations: {evolution_config.generations}")
