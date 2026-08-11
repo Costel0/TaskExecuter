@@ -43,6 +43,11 @@ _TASKS = {
         module="tasks.OGIA.perfect_pairs",
         description="Generate validated defense/optimized-attack pairs with the evolutionary optimizer.",
     ),
+    "ogia-train-attack-predictor": TaskSpec(
+        name="ogia-train-attack-predictor",
+        module="tasks.OGIA.train_attack_predictor",
+        description="Train the Phase-B M0 attack predictor from validated perfect pairs.",
+    ),
 }
 
 
