@@ -25,13 +25,41 @@ def canonicalize_genome(
         if fallback is None:
             raise ValueError("Genome has no positive ship weights and no fallback was supplied.")
         weights = {
-            ship_name: float(fallback.ship_weights.get(ship_name, 0.0))
+            ship_name: max(0.0, float(fallback.ship_weights.get(ship_name, 0.0)))
             for ship_name in config.allowed_ships
         }
         total = sum(weights.values())
         if total <= 0:
             raise ValueError("Fallback genome also has no positive ship weights.")
 
+    # Normalize first so the optional threshold always means point-share rather
+    # than depending on the arbitrary raw scale produced by crossover/mutation.
+    weights = {
+        ship_name: weight / total
+        for ship_name, weight in weights.items()
+        if weight > 0
+    }
+
+    if config.min_ship_weight > 0:
+        filtered = {
+            ship_name: weight
+            for ship_name, weight in weights.items()
+            if weight >= config.min_ship_weight
+        }
+        if filtered:
+            weights = filtered
+        else:
+            best_ship = max(weights, key=weights.get)
+            weights = {best_ship: weights[best_ship]}
+
+    if (
+        config.max_active_ship_types is not None
+        and len(weights) > config.max_active_ship_types
+    ):
+        ranked = sorted(weights.items(), key=lambda item: item[1], reverse=True)
+        weights = dict(ranked[: config.max_active_ship_types])
+
+    total = sum(weights.values())
     weights = {
         ship_name: weight / total
         for ship_name, weight in weights.items()
@@ -116,12 +144,7 @@ def mutate(
     config: EvolutionConfig,
     rng: np.random.Generator,
 ) -> AttackGenome:
-    """Apply small local changes to composition and total attack size.
-
-    This is intentionally a simple baseline operator. Once the analysis of the
-    random-battle dataset tells us which structural changes are useful, this
-    operator can be replaced without changing the evolutionary engine.
-    """
+    """Apply small local changes to composition and total attack size."""
 
     weights = {
         ship_name: float(genome.ship_weights.get(ship_name, 0.0))
