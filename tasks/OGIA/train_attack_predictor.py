@@ -7,8 +7,12 @@ import math
 from pathlib import Path
 
 from .attack_predictor import (
+    ATTACK_SHIPS,
     CombatEvaluationConfig,
+    PredictionPostprocessConfig,
     TrainingConfig,
+    deduplicate_perfect_pairs,
+    defense_group_key,
     evaluate_oof_against_oracle,
     load_perfect_pairs,
     train_attack_predictor,
@@ -29,18 +33,14 @@ def _positive_int(value: str) -> int:
 def _non_negative_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed) or parsed < 0:
-        raise argparse.ArgumentTypeError(
-            "must be a non-negative finite number"
-        )
+        raise argparse.ArgumentTypeError("must be a non-negative finite number")
     return parsed
 
 
 def _positive_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed) or parsed <= 0:
-        raise argparse.ArgumentTypeError(
-            "must be a positive finite number"
-        )
+        raise argparse.ArgumentTypeError("must be a positive finite number")
     return parsed
 
 
@@ -64,9 +64,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ogia-train-attack-predictor",
         description=(
-            "Train the Phase-B M0 attack predictor from validated "
-            "perfect-pair JSONL files and evaluate its out-of-fold attacks "
-            "with the real OGame combat engine."
+            "Train Phase-B M0 from validated perfect pairs and evaluate "
+            "out-of-fold attacks with the OGame combat engine."
         ),
     )
     parser.add_argument(
@@ -74,41 +73,32 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="?",
         type=Path,
         default=DEFAULT_INPUT,
-        help=(
-            "Perfect-pair JSONL file or directory "
-            "(default: data/OGIA/perfect_pairs)."
-        ),
+        help="Perfect-pair JSONL file or directory.",
     )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Output .pt checkpoint path.",
-    )
-    parser.add_argument(
-        "--report",
-        type=Path,
-        default=None,
-        help="Output JSON training/evaluation report path.",
-    )
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--folds", type=_positive_int, default=5)
     parser.add_argument("--epochs", type=_positive_int, default=500)
     parser.add_argument("--patience", type=_positive_int, default=50)
     parser.add_argument("--batch-size", type=_positive_int, default=16)
-    parser.add_argument(
-        "--learning-rate",
-        type=_positive_float,
-        default=1e-3,
-    )
-    parser.add_argument(
-        "--weight-decay",
-        type=_non_negative_float,
-        default=1e-4,
-    )
+    parser.add_argument("--learning-rate", type=_positive_float, default=1e-3)
+    parser.add_argument("--weight-decay", type=_non_negative_float, default=1e-4)
     parser.add_argument(
         "--multiplier-loss-weight",
         type=_non_negative_float,
         default=1.0,
+    )
+    parser.add_argument(
+        "--multiplier-underprediction-weight",
+        type=_positive_float,
+        default=3.0,
+        help="Extra loss multiplier when M0 predicts too few points (default: 3).",
+    )
+    parser.add_argument(
+        "--multiplier-loss-beta",
+        type=_positive_float,
+        default=0.10,
+        help="Smooth-L1 beta in real multiplier units (default: 0.10).",
     )
     parser.add_argument(
         "--hidden-dims",
@@ -116,67 +106,42 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=[128, 64],
     )
-    parser.add_argument(
-        "--dropout",
-        type=_non_negative_float,
-        default=0.05,
-    )
-    parser.add_argument(
-        "--min-multiplier",
-        type=_positive_float,
-        default=0.50,
-    )
-    parser.add_argument(
-        "--max-multiplier",
-        type=_positive_float,
-        default=6.00,
-    )
+    parser.add_argument("--dropout", type=_non_negative_float, default=0.05)
+    parser.add_argument("--min-multiplier", type=_positive_float, default=0.50)
+    parser.add_argument("--max-multiplier", type=_positive_float, default=6.00)
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument(
-        "--device",
-        default="auto",
-        help=(
-            "Torch device: auto, cpu, cuda, cuda:0, ... "
-            "(default: auto)."
-        ),
+    parser.add_argument("--device", default="auto")
+
+    postprocess = parser.add_argument_group("prediction postprocessing")
+    postprocess.add_argument(
+        "--min-ship-weight",
+        type=_non_negative_float,
+        default=0.01,
+        help="Drop predicted ship shares below this value (default: 0.01).",
+    )
+    postprocess.add_argument(
+        "--max-ship-types",
+        type=_positive_int,
+        default=5,
+        help="Maximum active ship types after sparsification (default: 5).",
+    )
+    postprocess.add_argument(
+        "--multiplier-safety-margin",
+        type=_non_negative_float,
+        default=0.03,
+        help="Small deployment margin added after prediction (default: 0.03x).",
     )
 
     combat = parser.add_argument_group("combat-aware OOF evaluation")
-    combat.add_argument(
-        "--combat-simulations",
-        type=_positive_int,
-        default=128,
-        help=(
-            "Fresh combat simulations for each model attack and oracle attack "
-            "(default: 128)."
-        ),
-    )
+    combat.add_argument("--combat-simulations", type=_positive_int, default=128)
     combat.add_argument(
         "--combat-reliable-win-rate",
         type=_probability,
         default=0.90,
-        help=(
-            "Win-rate threshold that makes an attack reliable during M0 "
-            "evaluation (default: 0.90)."
-        ),
     )
-    combat.add_argument(
-        "--combat-seed",
-        type=int,
-        default=123_456,
-        help="Seed for fresh common combat simulations (default: 123456).",
-    )
-    combat.add_argument(
-        "--combat-progress-every",
-        type=_positive_int,
-        default=10,
-        help="Print combat evaluation progress every N pairs (default: 10).",
-    )
-    combat.add_argument(
-        "--skip-combat-evaluation",
-        action="store_true",
-        help="Train M0 without running the real combat-engine OOF evaluation.",
-    )
+    combat.add_argument("--combat-seed", type=int, default=123_456)
+    combat.add_argument("--combat-progress-every", type=_positive_int, default=10)
+    combat.add_argument("--skip-combat-evaluation", action="store_true")
     return parser
 
 
@@ -185,28 +150,40 @@ def run(args=None) -> int:
     if parsed.dropout >= 1:
         raise ValueError("--dropout must be smaller than 1.")
     if parsed.max_multiplier <= parsed.min_multiplier:
+        raise ValueError("--max-multiplier must be greater than --min-multiplier.")
+    if parsed.min_ship_weight >= 1:
+        raise ValueError("--min-ship-weight must be smaller than 1.")
+    if parsed.max_ship_types > len(ATTACK_SHIPS):
         raise ValueError(
-            "--max-multiplier must be greater than --min-multiplier."
+            f"--max-ship-types cannot exceed {len(ATTACK_SHIPS)}."
         )
+    if parsed.multiplier_underprediction_weight < 1:
+        raise ValueError("--multiplier-underprediction-weight must be >= 1.")
 
     default_output, default_report = _default_output_paths()
     output_path = parsed.output or default_output
     report_path = parsed.report or (
         default_report
         if parsed.output is None
-        else parsed.output.with_name(
-            f"{parsed.output.stem}_report.json"
-        )
+        else parsed.output.with_name(f"{parsed.output.stem}_report.json")
     )
 
-    examples = load_perfect_pairs(parsed.input)
-    source_files = sorted({row.source_path for row in examples})
-    print(f"Perfect pairs: {len(examples)}", flush=True)
-    print(f"Source files: {len(source_files)}", flush=True)
+    raw_examples = load_perfect_pairs(parsed.input, deduplicate=False)
+    examples = deduplicate_perfect_pairs(raw_examples)
+    duplicate_count = len(raw_examples) - len(examples)
+    defense_count = len({defense_group_key(row) for row in examples})
+    source_files = sorted({row.source_path for row in raw_examples})
+
+    print(f"Raw JSONL pairs:       {len(raw_examples)}", flush=True)
+    print(f"Exact duplicates:      {duplicate_count}", flush=True)
+    print(f"Training pairs:        {len(examples)}", flush=True)
+    print(f"Distinct defenses:     {defense_count}", flush=True)
+    print("CV split:              grouped by defense", flush=True)
+    print(f"Source files:          {len(source_files)}", flush=True)
     for source in source_files:
         print(f"  - {source}", flush=True)
-    print(f"Model output: {output_path}", flush=True)
-    print(f"Report output: {report_path}", flush=True)
+    print(f"Model output:          {output_path}", flush=True)
+    print(f"Report output:         {report_path}", flush=True)
 
     config = TrainingConfig(
         folds=parsed.folds,
@@ -216,29 +193,45 @@ def run(args=None) -> int:
         learning_rate=parsed.learning_rate,
         weight_decay=parsed.weight_decay,
         multiplier_loss_weight=parsed.multiplier_loss_weight,
+        multiplier_underprediction_weight=(
+            parsed.multiplier_underprediction_weight
+        ),
+        multiplier_loss_beta=parsed.multiplier_loss_beta,
         hidden_dims=tuple(parsed.hidden_dims),
         dropout=parsed.dropout,
         min_multiplier=parsed.min_multiplier,
         max_multiplier=parsed.max_multiplier,
         seed=parsed.seed,
     )
+    postprocess_config = PredictionPostprocessConfig(
+        min_ship_weight=parsed.min_ship_weight,
+        max_ship_types=parsed.max_ship_types,
+        multiplier_safety_margin=parsed.multiplier_safety_margin,
+    )
+
     artifacts = train_attack_predictor(
         examples,
         output_path=output_path,
         config=config,
+        postprocess_config=postprocess_config,
         device=parsed.device,
     )
 
     report = dict(artifacts.report)
+    report["dataset"] = {
+        "raw_pair_count": len(raw_examples),
+        "exact_duplicate_count": duplicate_count,
+        "training_pair_count": len(examples),
+        "distinct_defense_count": defense_count,
+        "deduplicated": True,
+        "cv_grouped_by_defense": True,
+    }
     report["source_files"] = source_files
     report["checkpoint_path"] = str(artifacts.checkpoint_path)
 
     if not parsed.skip_combat_evaluation:
         print("", flush=True)
-        print(
-            "Combat-aware OOF evaluation against the Phase-A oracle:",
-            flush=True,
-        )
+        print("Combat-aware OOF evaluation against Phase-A oracle:", flush=True)
         report["combat_evaluation"] = evaluate_oof_against_oracle(
             examples,
             report["oof_predictions"],
@@ -251,37 +244,35 @@ def run(args=None) -> int:
         )
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report, indent=2),
-        encoding="utf-8",
-    )
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     metrics = report["oof_metrics"]
     print("", flush=True)
     print("Cross-validated M0 imitation metrics:", flush=True)
     print(
-        "  composition L1 distance: "
-        f"{metrics['composition_l1_distance']:.6f}",
+        f"  composition L1 distance: {metrics['composition_l1_distance']:.6f}",
         flush=True,
     )
     print(
-        "  composition cosine:      "
-        f"{metrics['composition_cosine_similarity']:.6f}",
+        f"  composition cosine:      {metrics['composition_cosine_similarity']:.6f}",
         flush=True,
     )
     print(
-        "  top ship accuracy:       "
-        f"{metrics['top_ship_accuracy']:.2%}",
+        f"  top ship accuracy:       {metrics['top_ship_accuracy']:.2%}",
         flush=True,
     )
     print(
-        "  multiplier MAE:          "
-        f"{metrics['multiplier_mae']:.6f}",
+        f"  multiplier MAE:          {metrics['multiplier_mae']:.6f}",
         flush=True,
     )
     print(
-        "  multiplier RMSE:         "
-        f"{metrics['multiplier_rmse']:.6f}",
+        "  multiplier signed error: "
+        f"{metrics['multiplier_mean_signed_error']:+.6f}",
+        flush=True,
+    )
+    print(
+        "  multiplier under-rate:   "
+        f"{metrics['multiplier_underprediction_rate']:.2%}",
         flush=True,
     )
 
@@ -291,51 +282,43 @@ def run(args=None) -> int:
         print("", flush=True)
         print("Combat-aware OOF metrics (primary):", flush=True)
         print(
-            "  model reliable attacks:  "
-            f"{summary['prediction_reliable_rate']:.2%}",
+            f"  model reliable attacks:   {summary['prediction_reliable_rate']:.2%}",
             flush=True,
         )
         print(
-            "  oracle reliable attacks: "
-            f"{summary['oracle_reliable_rate']:.2%}",
+            f"  oracle reliable attacks:  {summary['oracle_reliable_rate']:.2%}",
             flush=True,
         )
         print(
-            "  mean oracle efficiency:  "
-            f"{summary['mean_oracle_efficiency']:.2%}",
+            f"  mean oracle efficiency:   {summary['mean_oracle_efficiency']:.2%}",
             flush=True,
         )
         print(
-            "  median oracle efficiency:"
-            f" {summary['median_oracle_efficiency']:.2%}",
+            f"  median oracle efficiency: {summary['median_oracle_efficiency']:.2%}",
             flush=True,
         )
         print(
-            "  >= 90% oracle efficiency:"
-            f" {summary['oracle_efficiency_at_least_90pct']:.2%}",
+            "  >= 90% oracle efficiency: "
+            f"{summary['oracle_efficiency_at_least_90pct']:.2%}",
             flush=True,
         )
         print(
-            "  >= 95% oracle efficiency:"
-            f" {summary['oracle_efficiency_at_least_95pct']:.2%}",
+            "  >= 95% oracle efficiency: "
+            f"{summary['oracle_efficiency_at_least_95pct']:.2%}",
             flush=True,
         )
         print(
-            "  >= 99% oracle efficiency:"
-            f" {summary['oracle_efficiency_at_least_99pct']:.2%}",
+            "  >= 99% oracle efficiency: "
+            f"{summary['oracle_efficiency_at_least_99pct']:.2%}",
             flush=True,
         )
         print(
-            "  mean fitness score ratio:"
-            f" {summary['mean_fitness_score_ratio']:.2%}",
+            f"  mean fitness score ratio: {summary['mean_fitness_score_ratio']:.2%}",
             flush=True,
         )
 
     print("", flush=True)
-    print(
-        f"Saved checkpoint: {artifacts.checkpoint_path}",
-        flush=True,
-    )
+    print(f"Saved checkpoint: {artifacts.checkpoint_path}", flush=True)
     print(f"Saved report: {report_path}", flush=True)
     return 0
 
