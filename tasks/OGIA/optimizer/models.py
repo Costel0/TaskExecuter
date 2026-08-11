@@ -38,9 +38,6 @@ class AttackGenome:
         if total <= 0:
             raise ValueError("An attack genome must contain at least one positive ship weight.")
 
-        # Keep explicit zeroes when an allowed ship list is provided. This makes
-        # persisted optimizer labels directly convertible to fixed-size ML
-        # vectors while remaining compatible with fleet decoders that ignore 0%.
         return {
             ship_name: weight / total
             for ship_name, weight in weights.items()
@@ -119,6 +116,12 @@ class EvolutionConfig:
     max_points_multiplier: float = 6.0
     allowed_ships: tuple[str, ...] = DEFAULT_RANDOM_ATTACK_SHIPS
 
+    # Optional sparse-genome constraints. Defaults preserve the original Phase-A
+    # behavior; ML refinement enables them to prevent tiny softmax/crossover
+    # residues from forcing expensive ship types into decoded fleets.
+    min_ship_weight: float = 0.0
+    max_active_ship_types: int | None = None
+
     # Optional generic early stopping. ``None`` preserves the original behavior
     # and always executes every requested generation.
     stagnation_patience: int | None = None
@@ -154,6 +157,16 @@ class EvolutionConfig:
             raise ValueError("allowed_ships cannot be empty.")
         if len(set(self.allowed_ships)) != len(self.allowed_ships):
             raise ValueError("allowed_ships cannot contain duplicates.")
+
+        if self.min_ship_weight < 0 or self.min_ship_weight >= 1:
+            raise ValueError("min_ship_weight must be in [0, 1).")
+        if self.max_active_ship_types is not None:
+            if self.max_active_ship_types < 1:
+                raise ValueError("max_active_ship_types must be at least 1 or None.")
+            if self.max_active_ship_types > len(self.allowed_ships):
+                raise ValueError(
+                    "max_active_ship_types cannot exceed the allowed ship count."
+                )
 
         if self.stagnation_patience is not None and self.stagnation_patience < 1:
             raise ValueError("stagnation_patience must be at least 1 or None.")
