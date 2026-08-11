@@ -99,6 +99,21 @@ def defender_to_features(
     ).astype(np.float32)
 
 
+def defense_group_key(
+    example: PerfectPairExample,
+    *,
+    defense_units: Sequence[str] = DEFENSE_UNITS,
+) -> tuple[int, ...]:
+    """Key by exactly what the predictor sees as the physical defense.
+
+    Tech levels are deliberately not part of this key because they are not model
+    inputs. Repeated versions of the same defense must therefore stay in the same
+    cross-validation fold to avoid leakage.
+    """
+
+    return tuple(int(example.defender.get(unit, 0)) for unit in defense_units)
+
+
 def _normalise_ship_weights(
     values: Mapping[str, Any],
     *,
@@ -181,6 +196,56 @@ def _parse_pair(
     )
 
 
+def _stable_mapping(mapping: Mapping[str, Any]) -> str:
+    return json.dumps(
+        dict(mapping),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+
+
+def perfect_pair_fingerprint(
+    example: PerfectPairExample,
+    *,
+    attack_ships: Sequence[str] = ATTACK_SHIPS,
+) -> tuple[Any, ...]:
+    """Identify exact repeated optimizer results independent of pair_id/file."""
+
+    return (
+        defense_group_key(example),
+        tuple(
+            round(float(example.ship_weights.get(ship, 0.0)), 12)
+            for ship in attack_ships
+        ),
+        round(float(example.points_multiplier), 12),
+        _stable_mapping(example.attacker_tech),
+        _stable_mapping(example.defender_tech),
+        _stable_mapping(example.combat_config),
+    )
+
+
+def deduplicate_perfect_pairs(
+    examples: Iterable[PerfectPairExample],
+    *,
+    attack_ships: Sequence[str] = ATTACK_SHIPS,
+) -> tuple[PerfectPairExample, ...]:
+    """Keep the first occurrence of every exact defense/attack training pair."""
+
+    unique: list[PerfectPairExample] = []
+    seen: set[tuple[Any, ...]] = set()
+    for example in examples:
+        fingerprint = perfect_pair_fingerprint(
+            example,
+            attack_ships=attack_ships,
+        )
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        unique.append(example)
+    return tuple(unique)
+
+
 def resolve_pair_files(path: str | Path) -> tuple[Path, ...]:
     path = Path(path)
     if path.is_file():
@@ -205,6 +270,7 @@ def load_perfect_pairs(
     path: str | Path,
     *,
     attack_ships: Sequence[str] = ATTACK_SHIPS,
+    deduplicate: bool = True,
 ) -> tuple[PerfectPairExample, ...]:
     rows: list[PerfectPairExample] = []
     for source_path in resolve_pair_files(path):
@@ -229,6 +295,8 @@ def load_perfect_pairs(
                     ) from exc
     if not rows:
         raise ValueError(f"No perfect pairs found in {path}")
+    if deduplicate:
+        return deduplicate_perfect_pairs(rows, attack_ships=attack_ships)
     return tuple(rows)
 
 
