@@ -9,11 +9,18 @@ from .data import (
     DEFENSE_UNITS,
     FeatureScaler,
     PerfectPairExample,
+    deduplicate_perfect_pairs,
+    defense_group_key,
     defender_to_features,
     examples_to_arrays,
     load_perfect_pairs,
 )
 from .model import AttackPredictorConfig, AttackPredictorNet
+from .postprocessing import (
+    PredictionPostprocessConfig,
+    postprocess_prediction,
+    sparsify_ship_weights,
+)
 from .predictor import AttackPrediction, AttackPredictor
 from .training import (
     TrainingArtifacts,
@@ -31,11 +38,16 @@ __all__ = [
     "CombatEvaluationConfig",
     "FeatureScaler",
     "PerfectPairExample",
+    "PredictionPostprocessConfig",
     "TrainingArtifacts",
     "TrainingConfig",
+    "deduplicate_perfect_pairs",
+    "defense_group_key",
     "defender_to_features",
     "evaluate_oof_against_oracle",
     "examples_to_arrays",
     "load_perfect_pairs",
+    "postprocess_prediction",
+    "sparsify_ship_weights",
     "train_attack_predictor",
 ]
