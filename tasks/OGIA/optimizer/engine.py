@@ -64,6 +64,9 @@ class EvolutionaryOptimizer:
         ]
         self._notify(history[-1])
 
+        best_seen = float(history[-1].best_score)
+        stagnant_generations = 0
+
         for generation in range(1, self.config.generations + 1):
             ranked = sorted(
                 population,
@@ -90,6 +93,20 @@ class EvolutionaryOptimizer:
             stats = self._generation_stats(generation, population)
             history.append(stats)
             self._notify(stats)
+
+            improvement = float(stats.best_score) - best_seen
+            if improvement > self.config.stagnation_score_tolerance:
+                best_seen = float(stats.best_score)
+                stagnant_generations = 0
+            else:
+                stagnant_generations += 1
+
+            if (
+                self.config.stagnation_patience is not None
+                and generation >= self.config.min_generations_before_stopping
+                and stagnant_generations >= self.config.stagnation_patience
+            ):
+                break
 
         final_population = tuple(sorted(
             population,
