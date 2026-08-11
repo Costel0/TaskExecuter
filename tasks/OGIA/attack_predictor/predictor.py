@@ -10,6 +10,10 @@ import torch
 from ..optimizer import AttackGenome
 from .data import FeatureScaler, defender_to_features
 from .model import AttackPredictorConfig, AttackPredictorNet
+from .postprocessing import (
+    PredictionPostprocessConfig,
+    postprocess_prediction,
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,7 @@ class AttackPredictor:
         defense_units: tuple[str, ...],
         attack_ships: tuple[str, ...],
         device: torch.device,
+        postprocess_config: PredictionPostprocessConfig = PredictionPostprocessConfig(),
     ):
         self.model = model.to(device)
         self.model.eval()
@@ -42,6 +47,7 @@ class AttackPredictor:
         self.defense_units = defense_units
         self.attack_ships = attack_ships
         self.device = device
+        self.postprocess_config = postprocess_config
 
     @classmethod
     def load(
@@ -56,7 +62,8 @@ class AttackPredictor:
             map_location=resolved_device,
             weights_only=True,
         )
-        if int(checkpoint.get("schema_version", 0)) != 1:
+        schema_version = int(checkpoint.get("schema_version", 0))
+        if schema_version not in {1, 2}:
             raise ValueError("Unsupported attack-predictor checkpoint schema.")
 
         config = AttackPredictorConfig.from_dict(checkpoint["model_config"])
@@ -81,9 +88,14 @@ class AttackPredictor:
             defense_units=defense_units,
             attack_ships=attack_ships,
             device=resolved_device,
+            postprocess_config=PredictionPostprocessConfig.from_dict(
+                checkpoint.get("postprocess_config")
+            ),
         )
 
-    def predict(self, defender: Mapping[str, int]) -> AttackPrediction:
+    def predict_raw(self, defender: Mapping[str, int]) -> AttackPrediction:
+        """Return the direct dense neural-network output for diagnostics."""
+
         features = defender_to_features(
             defender,
             defense_units=self.defense_units,
@@ -97,13 +109,27 @@ class AttackPredictor:
             output = self.model(tensor)
 
         composition = output["composition"][0].detach().cpu().numpy()
-        multiplier = float(
-            output["multiplier"][0].detach().cpu().item()
-        )
+        multiplier = float(output["multiplier"][0].detach().cpu().item())
         weights = {
             ship_name: float(composition[index])
             for index, ship_name in enumerate(self.attack_ships)
         }
+        return AttackPrediction(
+            ship_weights=weights,
+            points_multiplier=multiplier,
+        )
+
+    def predict(self, defender: Mapping[str, int]) -> AttackPrediction:
+        """Return the deployable sparse prediction used by the optimizer."""
+
+        raw = self.predict_raw(defender)
+        weights, multiplier = postprocess_prediction(
+            raw.ship_weights,
+            raw.points_multiplier,
+            attack_ships=self.attack_ships,
+            config=self.postprocess_config,
+            max_multiplier=self.model.config.max_multiplier,
+        )
         return AttackPrediction(
             ship_weights=weights,
             points_multiplier=multiplier,
