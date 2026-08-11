@@ -119,6 +119,12 @@ class EvolutionConfig:
     max_points_multiplier: float = 6.0
     allowed_ships: tuple[str, ...] = DEFAULT_RANDOM_ATTACK_SHIPS
 
+    # Optional generic early stopping. ``None`` preserves the original behavior
+    # and always executes every requested generation.
+    stagnation_patience: int | None = None
+    min_generations_before_stopping: int = 0
+    stagnation_score_tolerance: float = 1e-4
+
     def __post_init__(self) -> None:
         if self.population_size < 2:
             raise ValueError("population_size must be at least 2.")
@@ -148,3 +154,14 @@ class EvolutionConfig:
             raise ValueError("allowed_ships cannot be empty.")
         if len(set(self.allowed_ships)) != len(self.allowed_ships):
             raise ValueError("allowed_ships cannot contain duplicates.")
+
+        if self.stagnation_patience is not None and self.stagnation_patience < 1:
+            raise ValueError("stagnation_patience must be at least 1 or None.")
+        if self.min_generations_before_stopping < 0:
+            raise ValueError("min_generations_before_stopping cannot be negative.")
+        if self.min_generations_before_stopping > self.generations:
+            raise ValueError(
+                "min_generations_before_stopping cannot exceed generations."
+            )
+        if self.stagnation_score_tolerance < 0:
+            raise ValueError("stagnation_score_tolerance cannot be negative.")
