@@ -75,6 +75,7 @@ def generate_random_defender(
     max_points: float = 40_000,
     min_unit_types: int = 3,
     max_unit_types: int = 6,
+    include_defenses: bool = True,
     include_ships: bool = True,
     require_ship: bool = False,
     require_defense: bool = False,
@@ -92,9 +93,9 @@ def generate_random_defender(
     expensive than the complete target budget are omitted for that sample, so
     very expensive ships such as Deathstars only appear at an appropriate scale.
 
-    ``require_ship`` and ``require_defense`` can be used to force mixed samples;
-    the normal random generator can still create defense-only, ship-only or mixed
-    compositions when neither requirement is enabled.
+    ``include_defenses`` and ``include_ships`` select which categories can be
+    sampled. ``require_ship`` and ``require_defense`` can additionally force at
+    least one unit from a category when that category is enabled.
     """
 
     generator = _resolve_rng(seed=seed, rng=rng)
@@ -115,18 +116,30 @@ def generate_random_defender(
     if not math.isfinite(target_points) or target_points <= 0:
         raise ValueError("target_points debe ser finito y mayor que cero.")
 
+    if not include_defenses and not include_ships:
+        raise ValueError("Debe habilitarse al menos una categoría defensora.")
+    if require_defense and not include_defenses:
+        raise ValueError("require_defense=True requiere include_defenses=True.")
     if require_ship and not include_ships:
         raise ValueError("require_ship=True requiere include_ships=True.")
+    if include_shield_domes and not include_defenses:
+        raise ValueError(
+            "include_shield_domes=True requiere include_defenses=True."
+        )
     if not math.isfinite(float(concentration)) or concentration <= 0:
         raise ValueError("concentration debe ser mayor que cero.")
     if not 0 <= shield_dome_probability <= 1:
         raise ValueError("shield_dome_probability debe estar entre 0 y 1.")
 
     ship_pool = _validated_ship_pool(allowed_ships) if include_ships else ()
-    eligible_defenses = tuple(
-        unit_name
-        for unit_name in DEFAULT_RANDOM_DEFENDER_DEFENSES
-        if _unit_points(unit_name) <= target_points
+    eligible_defenses = (
+        tuple(
+            unit_name
+            for unit_name in DEFAULT_RANDOM_DEFENDER_DEFENSES
+            if _unit_points(unit_name) <= target_points
+        )
+        if include_defenses
+        else ()
     )
     eligible_ships = tuple(
         unit_name
@@ -200,10 +213,14 @@ def generate_random_defender(
         return defender
 
     selected_ship_units = [
-        unit_name for unit_name in selected_units if not UNIT_SPECS[unit_name].is_defense
+        unit_name
+        for unit_name in selected_units
+        if not UNIT_SPECS[unit_name].is_defense
     ]
     selected_defense_units = [
-        unit_name for unit_name in selected_units if UNIT_SPECS[unit_name].is_defense
+        unit_name
+        for unit_name in selected_units
+        if UNIT_SPECS[unit_name].is_defense
     ]
 
     return {
