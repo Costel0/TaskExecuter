@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from ..defender import defender_points
 from ..fast_fleet import generate_fleet_from_percentages_fast
-from ..OgameUtils import defense_points
 from .models import AttackGenome
 
 
@@ -27,10 +27,10 @@ def decode_attack_genome(
 
     This is deterministic and deliberately separate from fitness. Fitness can
     therefore change without changing the genome representation or allocation
-    logic.
+    logic. The defender may contain both static defenses and ships.
     """
 
-    defender_total_points = defense_points(defender)
+    defender_total_points = defender_points(defender)
     target_attacker_points = defender_total_points * float(genome.points_multiplier)
 
     details = generate_fleet_from_percentages_fast(

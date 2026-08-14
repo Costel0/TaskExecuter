@@ -43,6 +43,11 @@ _TASKS = {
         module="tasks.OGIA.perfect_pairs",
         description="Generate validated defense/optimized-attack pairs with the evolutionary optimizer.",
     ),
+    "ogia-generate-perfect-pairs-with-ships": TaskSpec(
+        name="ogia-generate-perfect-pairs-with-ships",
+        module="tasks.OGIA.perfect_pairs_with_ships",
+        description="Generate validated perfect pairs for mixed defenders containing both static defenses and ships.",
+    ),
     "ogia-generate-perfect-pairs-ml": TaskSpec(
         name="ogia-generate-perfect-pairs-ml",
         module="tasks.OGIA.perfect_pairs_ml",

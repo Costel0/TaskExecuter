@@ -12,9 +12,10 @@ from ..OgameData import UNIT_SPECS
 from ..optimizer import EvolutionConfig
 
 
-DEFENSE_UNITS: tuple[str, ...] = tuple(
-    name for name, spec in UNIT_SPECS.items() if spec.is_defense
-)
+# Historical public name retained for checkpoint/API compatibility. It now
+# represents every unit the predictor may see on the defending side: ships and
+# static defenses alike.
+DEFENSE_UNITS: tuple[str, ...] = tuple(UNIT_SPECS.keys())
 ATTACK_SHIPS: tuple[str, ...] = EvolutionConfig().allowed_ships
 
 
@@ -91,7 +92,7 @@ def defender_to_features(
 
     total_points = float(sum(point_values))
     if total_points <= 0:
-        raise ValueError("Defender must contain at least one defensive unit.")
+        raise ValueError("Defender must contain at least one unit.")
 
     shares = np.asarray(point_values, dtype=np.float32) / total_points
     return np.concatenate(
